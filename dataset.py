@@ -5,7 +5,7 @@ from torch import nn, Tensor
 from torch.utils.data import Dataset, DataLoader
 import csv
 import pandas as pd
-from sklearn.model_selection import KFold
+from sklearn.model_selection import GroupKFold
 from PIL import Image
 
 
@@ -38,10 +38,10 @@ class RanzcrDataset(Dataset):
 
         return image, target
 
-def split_dataset(path: os.PathLike, num_split:int=5) -> None:
+def split_dataset(path: os.PathLike, dest_path: os.PathLike, num_split:int=5) -> None:
     df = pd.read_csv(path)
-    kfold = KFold(n_splits=num_split)
-    for fold, (train, valid) in enumerate(kfold.split(df, df.index)):
+    kfold = GroupKFold(n_splits=num_split)
+    for fold, (train, valid) in enumerate(kfold.split(df, df.index, df['PatientID'])):
         df.loc[valid, 'kfold'] = int(fold)
 
-    df.to_csv('data/split_kfold.csv', index=False)
+    df.to_csv(os.path.join(dest_path, 'split_kfold.csv'), index=False)
