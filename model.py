@@ -13,7 +13,7 @@ class RanzcrModel(LightningModule):
     def __init__(self, model: nn.Module = None):
         super().__init__()
         self.model = model
-        self.criterion = nn.MultiLabelSoftMarginLoss()
+        self.criterion = nn.BCEWithLogitsLoss()
 
     def forward(self, x):
         x = self.model(x)
@@ -25,7 +25,7 @@ class RanzcrModel(LightningModule):
 
         loss = self.criterion(y_hat, y)
 
-        neptune.log_metric('train loss', loss)
+        neptune.log_metric('train_loss', loss)
 
         return loss
 
@@ -42,29 +42,30 @@ class RanzcrModel(LightningModule):
         y = torch.cat([x['y'] for x in outputs])
         y_hat = torch.cat([x['y_hat'] for x in outputs])
 
-        try:
-            auc = self.get_mean_rocauc(y_hat, y)
-        except:
-            auc = 0
+        auc = self.get_mean_rocauc(y_hat, y)
 
-        self.log('test loss', avg_loss, prog_bar=True)
-        self.log('test auc', auc, prog_bar=True)
+        self.log('val_loss', avg_loss, prog_bar=True)
+        self.log('val_auc', auc, prog_bar=True)
 
-        neptune.log_metric('test loss', avg_loss)
-        neptune.log_metric('test auc', auc)
+        neptune.log_metric('val_loss', avg_loss)
+        neptune.log_metric('val_auc', auc)
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
+        optimizer = torch.optim.Adam(self.parameters(), lr=1e-4)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=10, eta_min=0)
+            optimizer, T_max=6, eta_min=1e-6)
 
         return [optimizer], [scheduler]
 
     def get_mean_rocauc(self, y_hat, y):
         scores = []
         y_hat, y = y_hat.cpu().detach(), y.cpu().detach()
-        for i in range(y.shape[0]):
-            score = roc_auc_score(y[i, :].int(), torch.sigmoid(y_hat[i, :]))
+        for i in range(y.shape[1]):
+            try:
+                score = roc_auc_score(
+                    y[:, i].int(), torch.sigmoid(y_hat[:, i]))
+            except:
+                score = 0
             scores.append(score)
         avg_score = np.mean(scores)
         return avg_score

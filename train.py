@@ -14,6 +14,8 @@ from model import RanzcrModel, EffnetModel, ResNet200DModel
 from torchinfo import summary
 from sklearn.model_selection import train_test_split
 from pytorch_lightning import Trainer
+from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
+
 
 # Init Neptune
 # neptune.init(project_qualified_name='simonvc/dacon-mnist',
@@ -32,11 +34,6 @@ neptune.create_experiment()
 
 # cuda cache 초기화
 torch.cuda.empty_cache()
-
-
-class config:
-    seed = 42
-    data_dir = 'data/'
 
 
 def seed_everything(seed=42):
@@ -65,15 +62,42 @@ def model_train(fold: int) -> None:
         os.path.join(config.data_dir, 'train'), os.path.join(config.save_dir, f'val-kfold-{fold}.csv'), transforms_test)
 
     model = RanzcrModel(ResNet200DModel())
+    checkpoint_callback = ModelCheckpoint(
+        monitor='val_loss',
+        dirpath=os.path.join(config.save_dir, f'{fold}'),
+        filename='{epoch:02d}-{val_loss:.2f}.pth',
+        save_top_k=5,
+        mode='min',
+    )
+    early_stopping = EarlyStopping(
+        monitor='val_loss',
+        mode='min',
+    )
 
     if config.device == 'tpu':
-        train_loader = DataLoader(train_dataset, batch_size=8, num_workers=10, shuffle=True)
-        val_loader = DataLoader(val_dataset, batch_size=2, num_workers=10, shuffle=False)
-        trainer = Trainer(tpu_cores=8, deterministic=True, check_val_every_n_epoch=1)
+        train_loader = DataLoader(
+            train_dataset, batch_size=16, num_workers=10, shuffle=True)
+        val_loader = DataLoader(val_dataset, batch_size=2,
+                                num_workers=10, shuffle=False)
+        trainer = Trainer(
+            tpu_cores=8,
+            num_sanity_val_steps=-1,
+            deterministic=True,
+            max_epochs=config.epochs,
+            callbacks=[checkpoint_callback, early_stopping]
+        )
     else:
-        train_loader = DataLoader(train_dataset, batch_size=8, num_workers=10, shuffle=True)
-        val_loader = DataLoader(val_dataset, batch_size=8, num_workers=10, shuffle=False)
-        trainer = Trainer(gpus=1, deterministic=True, check_val_every_n_epoch=1)
+        train_loader = DataLoader(
+            train_dataset, batch_size=16, num_workers=10, shuffle=True)
+        val_loader = DataLoader(val_dataset, batch_size=8,
+                                num_workers=10, shuffle=False)
+        trainer = Trainer(
+            gpus=1,
+            num_sanity_val_steps=-1,
+            deterministic=True,
+            max_epochs=config.epochs,
+            callbacks=[checkpoint_callback, early_stopping]
+        )
 
     trainer.fit(model, train_loader, val_loader)
 
@@ -81,9 +105,13 @@ def model_train(fold: int) -> None:
 if __name__ == '__main__':
     class config:
         seed = 42
+        epochs = 30
         data_dir = 'data/'
         save_dir = 'save/exp1'
         device = 'gpu'
+
+    from pathlib import Path
+    Path(config.save_dir).mkdir(parents=True, exist_ok=True)
 
     seed_everything(config.seed)
     split_dataset(os.path.join(config.data_dir, 'train.csv'), config.save_dir)
